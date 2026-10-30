@@ -1,0 +1,53 @@
+# Plan morning-digest § 3 and § 4. Builds the preview in CI and deploys it straight to Pages,
+# so the HTML (and the lane marker) never lands in the repo (ADR 0003).
+# Run with with_marker=true for review, then again with with_marker=false to clean up.
+name: preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      night:
+        description: Night to preview
+        default: '2026-10-28'
+      with_marker:
+        description: Put the lane marker in the banner
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      LANE_MARKER: ${{ inputs.with_marker && vars.LANE_MARKER || '' }}
+      PORT: '8787'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx -y pnpm@10 install --frozen-lockfile
+      - name: Save the page as one HTML file
+        run: |
+          npx -y pnpm@10 start &
+          for i in $(seq 1 30); do curl -sf localhost:8787/health && break; sleep 1; done
+          mkdir -p _site
+          curl -sf "localhost:8787/digest/${{ inputs.night }}" -o _site/index.html
+          grep -q "${LANE_MARKER:-no marker set}" _site/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+          retention-days: 1
+      - id: deploy
+        uses: actions/deploy-pages@v4
